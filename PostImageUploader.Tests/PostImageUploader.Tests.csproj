@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>PostImageUploader.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector"           Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk"       Version="17.8.0" />
+    <PackageReference Include="xunit"                        Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio"    Version="2.5.3" />
+  </ItemGroup>
+
+  <!-- Reference to main project (provides PostImageClient, UploadValidator, etc.) -->
+  <ItemGroup>
+    <ProjectReference Include="..\PostImageUploader.csproj" />
+  </ItemGroup>
+
+  <!-- Copy shared testdata to test output directory -->
+  <ItemGroup>
+    <None Update="..\testdata\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>testdata\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

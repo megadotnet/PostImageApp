@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>PostImageUploader</RootNamespace>
+    <AssemblyName>PostImageUploader</AssemblyName>
+  </PropertyGroup>
+
+  <!-- Explicitly exclude the Tests sub-project from this project's compilation -->
+  <ItemGroup>
+    <Compile Remove="PostImageUploader.Tests\**\*" />
+    <EmbeddedResource Remove="PostImageUploader.Tests\**\*" />
+    <None Remove="PostImageUploader.Tests\**\*" />
+  </ItemGroup>
+
+  <!-- Auto-copy testdata to output directory -->
+  <ItemGroup>
+    <None Update="testdata\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
