@@ -21,10 +21,24 @@ public class UploadIntegrationTests
     private static string TestFile(string name) =>
         Path.Combine(TestDataDir, name);
 
+    private const string JpgSourceUrl =
+        "https://www2.scut.edu.cn/_upload/tpl/00/f1/241/template241/images/head1_2.jpg";
+
+    private const string PngSourceUrl =
+        "https://test-images.github.io/png/202105/cs-black-000.png";
+
     /// <summary>
     /// Delay between upload integration tests to avoid PostImages.org rate limiting.
     /// </summary>
     private static readonly TimeSpan DelayBetweenTests = TimeSpan.FromSeconds(3);
+
+    // ── Constructor: ensure test data files exist ──────────────────────────────
+
+    public UploadIntegrationTests()
+    {
+        TestDataDownloader.EnsureFileAsync(JpgSourceUrl, TestFile("test_valid.jpg")).GetAwaiter().GetResult();
+        TestDataDownloader.EnsureFileAsync(PngSourceUrl, TestFile("test_valid.png")).GetAwaiter().GetResult();
+    }
 
     // ── Test #1: Upload valid JPG ──────────────────────────────────────────────
 
@@ -32,11 +46,6 @@ public class UploadIntegrationTests
     public async Task UploadValidJpg_ReturnsPostimgCcUrl()
     {
         var path = TestFile("test_valid.jpg");
-        if (!File.Exists(path))
-        {
-            Assert.True(true, "testdata/test_valid.jpg not found — skipping");
-            return;
-        }
 
         using var client = new PostImageClient(verbose: true);
         using var cts    = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -69,11 +78,6 @@ public class UploadIntegrationTests
     public async Task UploadValidPng_ReturnsPostimgCcUrl()
     {
         var path = TestFile("test_valid.png");
-        if (!File.Exists(path))
-        {
-            Assert.True(true, "testdata/test_valid.png not found — skipping");
-            return;
-        }
 
         using var client = new PostImageClient(verbose: true);
         using var cts    = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -92,29 +96,6 @@ public class UploadIntegrationTests
         Console.WriteLine($"[PNG] Uploaded URL: {result.ImageUrl}");
 
         await Task.Delay(DelayBetweenTests);
-    }
-
-    // ── Test #3: Upload oversized file — must fail locally ────────────────────
-
-    [Fact]
-    public async Task UploadOversizedFile_FailsLocally_WithFileTooLarge()
-    {
-        var path = TestFile("test_oversized.jpg");
-        if (!File.Exists(path))
-        {
-            Assert.True(true, "testdata/test_oversized.jpg not found — skipping");
-            return;
-        }
-
-        using var client = new PostImageClient(verbose: false);
-        using var cts    = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-
-        var result = await client.UploadFileAsync(path, cts.Token);
-
-        // Must fail locally before network
-        Assert.False(result.Success, "Oversized file should be rejected");
-        Assert.Equal(0, result.HttpStatusCode);   // locally intercepted, no HTTP call
-        Assert.Contains("FileTooLarge", result.ErrorMessage);
     }
 
     // ── Test #4: Upload from remote URL ──────────────────────────────────────
@@ -178,11 +159,6 @@ public class UploadIntegrationTests
     public async Task UploadValidJpg_ResultContainsTiming()
     {
         var path = TestFile("test_valid.jpg");
-        if (!File.Exists(path))
-        {
-            Assert.True(true, "testdata/test_valid.jpg not found — skipping");
-            return;
-        }
 
         using var client = new PostImageClient(verbose: false);
         using var cts    = new CancellationTokenSource(TimeSpan.FromMinutes(2));

@@ -1,0 +1,7 @@
+- [x] `TestDataDownloader.cs` exists in `PostImageUploader.Tests/Integration/`
+- [x] `TestDataDownloader` has a method to download from URL to file path
+- [x] `TestDataDownloader` skips download if file already exists
+- [x] `UploadIntegrationTests.cs` calls downloader for `test_valid.jpg` before upload test
+- [x] `UploadIntegrationTests.cs` calls downloader for `test_valid.png` before upload test
+- [ ] `testdata/test_valid.jpg` exists and is > 0 bytes
+- [ ] `testdata/test_valid.png` exists and is > 0 bytes
