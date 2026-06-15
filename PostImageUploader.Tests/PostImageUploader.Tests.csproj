@@ -10,15 +10,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector"           Version="6.0.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk"       Version="17.8.0" />
-    <PackageReference Include="xunit"                        Version="2.5.3" />
-    <PackageReference Include="xunit.runner.visualstudio"    Version="2.5.3" />
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
 
   <!-- Reference to main project (provides PostImageClient, UploadValidator, etc.) -->
   <ItemGroup>
-    <ProjectReference Include="..\PostImageUploader.csproj" />
+    <ProjectReference Include="..\App.Cli.csproj" />
+    <ProjectReference Include="..\App.Core\App.Core.csproj" />
   </ItemGroup>
 
   <!-- Copy shared testdata to test output directory -->

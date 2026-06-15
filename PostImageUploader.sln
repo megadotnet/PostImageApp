@@ -3,9 +3,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.32228.343
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "PostImageUploader", "PostImageUploader.csproj", "{25D36B92-3376-4FAE-BF3D-4684356117B4}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "App.Cli", "App.Cli.csproj", "{25D36B92-3376-4FAE-BF3D-4684356117B4}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PostImageUploader.Tests", "PostImageUploader.Tests\PostImageUploader.Tests.csproj", "{CCCD8AD3-4069-4CB6-A5AC-4242B96066DC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "App.Core", "App.Core\App.Core.csproj", "{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -41,6 +43,18 @@ Global
 		{CCCD8AD3-4069-4CB6-A5AC-4242B96066DC}.Release|x64.Build.0 = Release|Any CPU
 		{CCCD8AD3-4069-4CB6-A5AC-4242B96066DC}.Release|x86.ActiveCfg = Release|Any CPU
 		{CCCD8AD3-4069-4CB6-A5AC-4242B96066DC}.Release|x86.Build.0 = Release|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Debug|x64.Build.0 = Debug|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Debug|x86.Build.0 = Debug|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Release|x64.ActiveCfg = Release|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Release|x64.Build.0 = Release|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Release|x86.ActiveCfg = Release|Any CPU
+		{D34E8F71-D2C6-431C-A8B3-FA3748D5B81D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

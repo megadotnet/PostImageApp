@@ -9,11 +9,14 @@
     <AssemblyName>PostImageUploader</AssemblyName>
   </PropertyGroup>
 
-  <!-- Explicitly exclude the Tests sub-project from this project's compilation -->
+  <!-- Explicitly exclude the Tests and App.Core sub-projects from this project's compilation -->
   <ItemGroup>
     <Compile Remove="PostImageUploader.Tests\**\*" />
     <EmbeddedResource Remove="PostImageUploader.Tests\**\*" />
     <None Remove="PostImageUploader.Tests\**\*" />
+    <Compile Remove="App.Core\**\*" />
+    <EmbeddedResource Remove="App.Core\**\*" />
+    <None Remove="App.Core\**\*" />
   </ItemGroup>
 
   <!-- Auto-copy testdata to output directory -->
@@ -21,6 +24,13 @@
     <None Update="testdata\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="App.Core\App.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
   </ItemGroup>
 
 </Project>
