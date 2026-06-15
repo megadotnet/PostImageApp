@@ -124,7 +124,7 @@ public class UploadIntegrationTests
     {
         // Small, stable public PNG for URL upload test
         const string remoteUrl =
-            "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png";
+            "https://test-images.github.io/png/202105/cs-black-000.png";
 
         using var client = new PostImageClient(verbose: true);
         using var cts    = new CancellationTokenSource(TimeSpan.FromMinutes(2));
