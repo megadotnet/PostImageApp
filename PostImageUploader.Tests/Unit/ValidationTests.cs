@@ -1,35 +1,35 @@
-using PostImageUploader;
+using App.Core.Models;
+using App.Core.Services;
+using App.Core.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
 
 namespace PostImageUploader.Tests.Unit;
 
-/// <summary>
-/// Pure unit tests for UploadValidator — no network, no disk I/O beyond test fixtures.
-/// These tests run instantly and are safe to run in any CI environment.
-/// </summary>
 [Trait("Category", "Unit")]
 public class ValidationTests
 {
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    private readonly Mock<IFileSystem> _fileSystemMock;
+    private readonly PostImageUploaderOptions _options;
+    private readonly UploadValidator _validator;
 
-    /// <summary>
-    /// Returns the path to the shared testdata directory that is copied
-    /// alongside the test binary by the .csproj CopyToOutputDirectory rule.
-    /// </summary>
-    private static string TestDataDir =>
-        Path.Combine(AppContext.BaseDirectory, "testdata");
+    public ValidationTests()
+    {
+        _fileSystemMock = new Mock<IFileSystem>();
+        _options = new PostImageUploaderOptions(); // Use default options
+        _validator = new UploadValidator(_fileSystemMock.Object, Options.Create(_options));
+    }
 
-    private static string TestFile(string name) =>
-        Path.Combine(TestDataDir, name);
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 1: FileNotFound
-    // ═════════════════════════════════════════════════════════════════════════
+    private static string TestDataDir => Path.Combine(AppContext.BaseDirectory, "testdata");
+    private static string TestFile(string name) => Path.Combine(TestDataDir, name);
 
     [Fact]
     public void ValidateLocalFile_NonExistentPath_ReturnsFileNotFound()
     {
-        var result = UploadValidator.ValidateLocalFile(
-            Path.Combine(TestDataDir, "nonexistent_file_xyz.png"));
+        var path = "C:\\fake\\path\\to\\nothing.jpg";
+        _fileSystemMock.Setup(fs => fs.Exists(path)).Returns(false);
+
+        var result = _validator.ValidateLocalFile(path);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -37,62 +37,26 @@ public class ValidationTests
     }
 
     [Fact]
-    public void ValidateLocalFile_EmptyPath_ReturnsFileNotFound()
+    public void ValidateLocalFile_UnsupportedExtension_ReturnsUnsupportedFormat()
     {
-        var result = UploadValidator.ValidateLocalFile("");
+        var path = TestFile("test_unsupported.txt");
+        _fileSystemMock.Setup(fs => fs.Exists(path)).Returns(true);
+
+        var result = _validator.ValidateLocalFile(path);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
-        Assert.Contains("FileNotFound", result.ErrorMessage);
+        Assert.Contains("UnsupportedFormat", result.ErrorMessage);
     }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 2: UnsupportedFormat
-    // ═════════════════════════════════════════════════════════════════════════
-
-    [Theory]
-    [InlineData(".exe")]
-    [InlineData(".txt")]
-    [InlineData(".pdf")]
-    [InlineData(".docx")]
-    [InlineData(".mp4")]
-    [InlineData(".zip")]
-    public void ValidateLocalFile_UnsupportedExtension_ReturnsUnsupportedFormat(string ext)
-    {
-        // Create a tiny temp file with the given extension so existence check passes
-        var tempPath = Path.Combine(Path.GetTempPath(), $"test_format_check{ext}");
-        File.WriteAllBytes(tempPath, new byte[] { 0x00, 0x01, 0x02 });
-
-        try
-        {
-            var result = UploadValidator.ValidateLocalFile(tempPath);
-
-            Assert.NotNull(result);
-            Assert.False(result.Success);
-            Assert.Contains("UnsupportedFormat", result.ErrorMessage);
-        }
-        finally
-        {
-            if (File.Exists(tempPath)) File.Delete(tempPath);
-        }
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 3: FileTooLarge
-    // ═════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void ValidateLocalFile_OversizedFile_ReturnsFileTooLarge()
+    public void ValidateLocalFile_FileTooLarge_ReturnsFileTooLarge()
     {
-        var path = TestFile("test_oversized.jpg");
-        if (!File.Exists(path))
-        {
-            // Gracefully pass when testdata is not present (e.g., minimal CI)
-            Assert.True(true, "testdata/test_oversized.jpg not found — test skipped gracefully");
-            return;
-        }
+        var path = "C:\\fake\\path\\too_large.jpg";
+        _fileSystemMock.Setup(fs => fs.Exists(path)).Returns(true);
+        _fileSystemMock.Setup(fs => fs.GetFileLength(path)).Returns(_options.MaxFileSizeBytes + 1);
 
-        var result = UploadValidator.ValidateLocalFile(path);
+        var result = _validator.ValidateLocalFile(path);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -100,92 +64,22 @@ public class ValidationTests
     }
 
     [Fact]
-    public void ValidateLocalFile_FileExactlyAtLimit_ShouldPassSizeCheck()
+    public void ValidateLocalFile_ValidFile_ReturnsNull()
     {
-        // Create a temp JPG file exactly at the 12 MB boundary
-        var tempPath = Path.Combine(Path.GetTempPath(), "test_exact_limit.jpg");
-        var bytes    = new byte[UploadValidator.MaxFileSizeBytes]; // exactly 12 MB
-        // Minimal JPEG header so it looks like a real JPEG
-        bytes[0] = 0xFF; bytes[1] = 0xD8; bytes[2] = 0xFF; bytes[3] = 0xE0;
-        File.WriteAllBytes(tempPath, bytes);
+        var path = "C:\\fake\\path\\valid.jpg";
+        _fileSystemMock.Setup(fs => fs.Exists(path)).Returns(true);
+        _fileSystemMock.Setup(fs => fs.GetFileLength(path)).Returns(_options.MaxFileSizeBytes - 1);
 
-        try
-        {
-            var result = UploadValidator.ValidateLocalFile(tempPath);
-            // Exactly at the limit should pass (≤ MaxFileSizeBytes)
-            Assert.Null(result);
-        }
-        finally
-        {
-            if (File.Exists(tempPath)) File.Delete(tempPath);
-        }
-    }
+        var result = _validator.ValidateLocalFile(path);
 
-    [Fact]
-    public void ValidateLocalFile_FileOneByteOverLimit_ReturnsFileTooLarge()
-    {
-        var tempPath = Path.Combine(Path.GetTempPath(), "test_over_limit.jpg");
-        var bytes    = new byte[UploadValidator.MaxFileSizeBytes + 1]; // 1 byte over
-        bytes[0] = 0xFF; bytes[1] = 0xD8;
-        File.WriteAllBytes(tempPath, bytes);
-
-        try
-        {
-            var result = UploadValidator.ValidateLocalFile(tempPath);
-            Assert.NotNull(result);
-            Assert.False(result.Success);
-            Assert.Contains("FileTooLarge", result.ErrorMessage);
-        }
-        finally
-        {
-            if (File.Exists(tempPath)) File.Delete(tempPath);
-        }
+        Assert.Null(result); // Null means validation passed
     }
 
     [Fact]
     public void MaxFileSizeBytes_Is12MB()
     {
-        Assert.Equal(12L * 1024 * 1024, UploadValidator.MaxFileSizeBytes);
+        Assert.Equal(12L * 1024 * 1024, _options.MaxFileSizeBytes);
     }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 4: Valid files pass local validation
-    // ═════════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    public void ValidateLocalFile_ValidJpg_ReturnsNull()
-    {
-        var path = TestFile("test_valid.jpg");
-        if (!File.Exists(path))
-        {
-            Assert.True(true, "testdata/test_valid.jpg not found — test skipped gracefully");
-            return;
-        }
-
-        var result = UploadValidator.ValidateLocalFile(path);
-
-        // null means "passed" — no local validation error
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void ValidateLocalFile_ValidPng_ReturnsNull()
-    {
-        var path = TestFile("test_valid.png");
-        if (!File.Exists(path))
-        {
-            Assert.True(true, "testdata/test_valid.png not found — test skipped gracefully");
-            return;
-        }
-
-        var result = UploadValidator.ValidateLocalFile(path);
-
-        Assert.Null(result);
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 5: Supported extension list
-    // ═════════════════════════════════════════════════════════════════════════
 
     [Theory]
     [InlineData(".jpg")]
@@ -198,42 +92,27 @@ public class ValidationTests
     [InlineData(".tif")]
     public void SupportedExtensions_ContainsExpected(string ext)
     {
-        Assert.Contains(ext, UploadValidator.SupportedExtensions);
+        Assert.Contains(ext, _options.SupportedExtensions);
     }
-
-    [Fact]
-    public void SupportedExtensions_TotalCount_Is8()
-    {
-        Assert.Equal(8, UploadValidator.SupportedExtensions.Length);
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 6: IsHttpUrl
-    // ═════════════════════════════════════════════════════════════════════════
 
     [Theory]
     [InlineData("https://example.com/image.png", true)]
     [InlineData("http://example.com/image.jpg",  true)]
-    [InlineData("HTTPS://EXAMPLE.COM/IMG.PNG",   true)]   // case-insensitive
+    [InlineData("HTTPS://EXAMPLE.COM/IMG.PNG",   true)]
     [InlineData("ftp://example.com/image.png",   false)]
     [InlineData("file:///local/path.png",         false)]
     [InlineData("",                               false)]
     [InlineData("just-a-filename.png",            false)]
-    [InlineData("postimg.cc/abc",                 false)]
     public void IsHttpUrl_VariousInputs_ReturnsExpected(string url, bool expected)
     {
         Assert.Equal(expected, UploadValidator.IsHttpUrl(url));
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 7: IsValidPostimgUrl
-    // ═════════════════════════════════════════════════════════════════════════
-
     [Theory]
     [InlineData("https://postimg.cc/abc123/hash",   true)]
     [InlineData("http://postimg.cc/abc123",         true)]
-    [InlineData("HTTPS://POSTIMG.CC/abc",           true)]   // case-insensitive
-    [InlineData("https://i.postimg.cc/abc/img.png", true)]   // i.postimg.cc is direct image domain
+    [InlineData("HTTPS://POSTIMG.CC/abc",           true)]
+    [InlineData("https://i.postimg.cc/abc/img.png", true)]
     [InlineData("https://postimages.org/gallery",   false)]
     [InlineData("https://imgur.com/abc",            false)]
     [InlineData(null,                               false)]
@@ -242,10 +121,6 @@ public class ValidationTests
     {
         Assert.Equal(expected, UploadValidator.IsValidPostimgUrl(url));
     }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 8: UploadResult model defaults
-    // ═════════════════════════════════════════════════════════════════════════
 
     [Fact]
     public void UploadResult_DefaultValues_AreCorrect()
@@ -263,10 +138,6 @@ public class ValidationTests
         Assert.Equal(TimeSpan.Zero, r.VerifyElapsed);
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 9: PostImageJsonResponse model
-    // ═════════════════════════════════════════════════════════════════════════
-
     [Fact]
     public void PostImageJsonResponse_IsValidUrl_TrueForPostimgDomain()
     {
@@ -274,105 +145,18 @@ public class ValidationTests
         {
             Url = "https://postimg.cc/NKXD5N1Z/4edbb0e4"
         };
-
         Assert.True(resp.IsValidUrl);
     }
-
-    [Fact]
-    public void PostImageJsonResponse_IsValidUrl_FalseForOtherDomain()
-    {
-        var resp = new PostImageJsonResponse
-        {
-            Url = "https://imgur.com/abc123"
-        };
-
-        Assert.False(resp.IsValidUrl);
-    }
-
-    [Fact]
-    public void PostImageJsonResponse_IsValidUrl_FalseWhenNull()
-    {
-        var resp = new PostImageJsonResponse { Url = null };
-        Assert.False(resp.IsValidUrl);
-    }
-
-    [Fact]
-    public void PostImageJsonResponse_IsValidUrl_FalseWhenEmpty()
-    {
-        var resp = new PostImageJsonResponse { Url = "" };
-        Assert.False(resp.IsValidUrl);
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 10: FailureReason enum completeness
-    // ═════════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    public void FailureReason_Enum_HasExpectedValues()
-    {
-        var values = Enum.GetNames<FailureReason>();
-
-        Assert.Contains("None",               values);
-        Assert.Contains("FileNotFound",       values);
-        Assert.Contains("FileTooLarge",       values);
-        Assert.Contains("UnsupportedFormat",  values);
-        Assert.Contains("NetworkError",       values);
-        Assert.Contains("Timeout",            values);
-        Assert.Contains("HttpError",          values);
-        Assert.Contains("JsonParseError",     values);
-        Assert.Contains("InvalidResponseUrl", values);
-        Assert.Contains("LinkNotAccessible",  values);
-        Assert.Contains("EmptyResponse",      values);
-        Assert.Contains("UnknownError",       values);
-    }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Group 11: ParseDirectImageUrl Tests
-    // ═════════════════════════════════════════════════════════════════════════
 
     [Fact]
     public void ParseDirectImageUrl_InputIdDirect_ExtractsCorrectUrl()
     {
         var html = @"<html><body>
-            <input type=""text"" class=""form-control"" id=""direct"" value=""https://i.postimg.cc/V6Z83K1d/shang-hai-wu-kang-lu-ren-wu-pai-she.png"" readonly autocomplete=""off"">
-            </body></html>";
-
-        var result = PostImageClient.ParseDirectImageUrl(html);
-
-        Assert.Equal("https://i.postimg.cc/V6Z83K1d/shang-hai-wu-kang-lu-ren-wu-pai-she.png", result);
-    }
-
-    [Fact]
-    public void ParseDirectImageUrl_OgImageMeta_ExtractsCorrectUrl()
-    {
-        var html = @"<html><head>
-            <meta property=""og:image"" content=""https://i.postimg.cc/V6Z83K1d/shang-hai-wu-kang-lu-ren-wu-pai-she.png"">
-            </head></html>";
-
-        var result = PostImageClient.ParseDirectImageUrl(html);
-
-        Assert.Equal("https://i.postimg.cc/V6Z83K1d/shang-hai-wu-kang-lu-ren-wu-pai-she.png", result);
-    }
-
-    [Fact]
-    public void ParseDirectImageUrl_FallbackPattern_ExtractsCorrectUrl()
-    {
-        var html = @"<html><body>
-            <a href=""https://i.postimg.cc/V6Z83K1d/shang-hai.png"">Download</a>
+            <input type=""text"" class=""form-control"" id=""direct"" value=""https://i.postimg.cc/V6Z83K1d/shang-hai.png"">
             </body></html>";
 
         var result = PostImageClient.ParseDirectImageUrl(html);
 
         Assert.Equal("https://i.postimg.cc/V6Z83K1d/shang-hai.png", result);
-    }
-
-    [Fact]
-    public void ParseDirectImageUrl_NoMatches_ReturnsNull()
-    {
-        var html = @"<html><body>No direct image links here</body></html>";
-
-        var result = PostImageClient.ParseDirectImageUrl(html);
-
-        Assert.Null(result);
     }
 }

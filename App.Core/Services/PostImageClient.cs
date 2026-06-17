@@ -1,160 +1,59 @@
+using System;
+using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
+using App.Core.Abstractions;
+using App.Core.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-namespace PostImageUploader;
+namespace App.Core.Services;
 
-// ── API 响应模型（匹配真实接口：{"url":"...","image":"..."}）────────────────
-public class PostImageJsonResponse
-{
-    [JsonPropertyName("url")]
-    public string? Url { get; set; }
-
-    [JsonPropertyName("image")]
-    public string? Image { get; set; }
-
-    /// <summary>返回的 URL 是否为合法链接</summary>
-    public bool IsValidUrl =>
-        !string.IsNullOrWhiteSpace(Url) &&
-        (Url.StartsWith("https://postimg.cc/", StringComparison.OrdinalIgnoreCase) ||
-         Url.StartsWith("http://postimg.cc/",  StringComparison.OrdinalIgnoreCase));
-}
-
-// ── 上传结果 ──────────────────────────────────────────────────────────────────
-public class UploadResult
-{
-    /// <summary>整体是否成功（上传 + 链接可访问）</summary>
-    public bool     Success         { get; set; }
-
-    /// <summary>postimg.cc 页面链接或解析后的最终图片链接</summary>
-    public string?  ImageUrl        { get; set; }
-
-    /// <summary>图片直链（从 HTML 解析出的原始后缀 URL）</summary>
-    public string?  DirectImageUrl  { get; set; }
-
-    /// <summary>原始上传返回的 HTML 页面链接</summary>
-    public string?  PageUrl         { get; set; }
-
-    /// <summary>链接可访问性校验是否通过</summary>
-    public bool     LinkAccessible  { get; set; }
-
-    /// <summary>失败时的原因描述</summary>
-    public string?  ErrorMessage    { get; set; }
-
-    /// <summary>HTTP 状态码（本地拦截时为 0）</summary>
-    public int      HttpStatusCode  { get; set; }
-
-    /// <summary>原始响应体（调试用）</summary>
-    public string?  RawResponse     { get; set; }
-
-    /// <summary>文件大小（字节）</summary>
-    public long     FileSizeBytes   { get; set; }
-
-    /// <summary>上传耗时</summary>
-    public TimeSpan UploadElapsed  { get; set; }
-
-    /// <summary>链接验证耗时</summary>
-    public TimeSpan VerifyElapsed  { get; set; }
-}
-
-// ── 失败原因枚举 ──────────────────────────────────────────────────────────────
-public enum FailureReason
-{
-    None,
-    FileNotFound,
-    FileTooLarge,
-    UnsupportedFormat,
-    NetworkError,
-    Timeout,
-    HttpError,
-    JsonParseError,
-    InvalidResponseUrl,
-    LinkNotAccessible,
-    EmptyResponse,
-    UnknownError,
-}
-
-// ── 可独立测试的本地校验逻辑（static，无 I/O 依赖）────────────────────────────
-public static class UploadValidator
-{
-    public static readonly long MaxFileSizeBytes = 12L * 1024 * 1024; // 12 MB
-
-    public static readonly string[] SupportedExtensions =
-        { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif" };
-
-    /// <summary>
-    /// 对本地文件路径执行前置校验。
-    /// 返回 null 表示通过；返回非 null 表示失败的 UploadResult。
-    /// </summary>
-    public static UploadResult? ValidateLocalFile(string filePath)
-    {
-        if (!File.Exists(filePath))
-            return Fail(FailureReason.FileNotFound, $"文件不存在: {filePath}");
-
-        var ext = Path.GetExtension(filePath).ToLowerInvariant();
-        if (!SupportedExtensions.Contains(ext))
-            return Fail(FailureReason.UnsupportedFormat,
-                $"不支持的格式 '{ext}'。PostImages 支持: " +
-                string.Join(", ", SupportedExtensions));
-
-        var info = new FileInfo(filePath);
-        if (info.Length > MaxFileSizeBytes)
-            return Fail(FailureReason.FileTooLarge,
-                $"文件过大: {info.Length / 1024.0 / 1024.0:F2} MB " +
-                $"（PostImages 限制约 {MaxFileSizeBytes / 1024 / 1024} MB）");
-
-        return null; // all checks passed
-    }
-
-    /// <summary>检查 URL 字符串是否以 http(s):// 开头</summary>
-    public static bool IsHttpUrl(string value) =>
-        value.StartsWith("http://",  StringComparison.OrdinalIgnoreCase) ||
-        value.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>检查 postimg.cc URL 合法性</summary>
-    public static bool IsValidPostimgUrl(string? url) =>
-        !string.IsNullOrWhiteSpace(url) &&
-        (url.StartsWith("https://postimg.cc/", StringComparison.OrdinalIgnoreCase) ||
-         url.StartsWith("http://postimg.cc/",  StringComparison.OrdinalIgnoreCase) ||
-         url.StartsWith("https://i.postimg.cc/", StringComparison.OrdinalIgnoreCase) ||
-         url.StartsWith("http://i.postimg.cc/",  StringComparison.OrdinalIgnoreCase));
-
-    internal static UploadResult Fail(FailureReason reason, string message) =>
-        new() { Success = false, ErrorMessage = $"失败原因: {reason} — {message}" };
-}
-
-// ── PostImage 上传客户端 ───────────────────────────────────────────────────────
-public class PostImageClient : IDisposable
+/// <summary>
+/// The primary implementation of <see cref="IPostImageClient"/> that handles the HTTP communication
+/// with PostImages.org, mimicking browser behavior to bypass basic bot protections.
+/// </summary>
+public class PostImageClient : IPostImageClient, IDisposable
 {
     private readonly HttpClient _httpClient;
-    private readonly bool       _verbose;
+    private readonly ILogger<PostImageClient> _logger;
+    private readonly IFileSystem _fileSystem;
+    private readonly UploadValidator _validator;
+    private readonly TimeProvider _timeProvider;
+    private readonly PostImageUploaderOptions _options;
 
-    // ── 真实接口地址（从 Chrome 抓包验证）─────────────────────────────────────
     private const string UploadApiUrl = "https://postimages.org/json";
     private const string HomeUrl      = "https://postimages.org/";
 
     private bool _sessionReady;
     private bool _disposed;
 
-    /// <param name="verbose">
-    /// true  = 输出详细进度日志到 Console（测试 / 调试模式）<br/>
-    /// false = 静默模式（CLI 生产使用）
-    /// </param>
-    public PostImageClient(bool verbose = true)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PostImageClient"/> class.
+    /// </summary>
+    public PostImageClient(
+        HttpClient httpClient,
+        ILogger<PostImageClient> logger,
+        IFileSystem fileSystem,
+        UploadValidator validator,
+        TimeProvider timeProvider,
+        IOptions<PostImageUploaderOptions> options)
     {
-        _verbose = verbose;
+        _httpClient = httpClient;
+        _logger = logger;
+        _fileSystem = fileSystem;
+        _validator = validator;
+        _timeProvider = timeProvider;
+        _options = options.Value;
 
-        var handler = new HttpClientHandler
-        {
-            UseCookies               = true,
-            CookieContainer          = new CookieContainer(),
-            AllowAutoRedirect        = true,
-            MaxAutomaticRedirections = 5,
-        };
-
-        _httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(120) };
+        // Note: The HTTP handler configuration (Cookies, AllowAutoRedirect)
+        // is now expected to be configured in DI when setting up the HttpClient.
+        _httpClient.Timeout = TimeSpan.FromSeconds(120);
 
         // 模拟 Chrome 148 请求头
         _httpClient.DefaultRequestHeaders.Add("User-Agent",
@@ -165,7 +64,9 @@ public class PostImageClient : IDisposable
             "zh-CN,zh;q=0.9,en;q=0.8");
     }
 
-    // ── 建立 Session（抓取首页 Cookie）────────────────────────────────────────
+    /// <summary>
+    /// Makes an initial request to the homepage to obtain session cookies required by the upload API.
+    /// </summary>
     private async Task EnsureSessionAsync(CancellationToken ct)
     {
         if (_sessionReady) return;
@@ -187,29 +88,28 @@ public class PostImageClient : IDisposable
         _sessionReady = true;
     }
 
-    // ── 公开方法：从本地文件上传 ─────────────────────────────────────────────
+    /// <inheritdoc />
     public async Task<UploadResult> UploadFileAsync(
         string filePath, CancellationToken ct = default)
     {
-        // 本地校验（委托给可单独测试的 UploadValidator）
-        var validationError = UploadValidator.ValidateLocalFile(filePath);
+        var validationError = _validator.ValidateLocalFile(filePath);
         if (validationError is not null) return validationError;
 
         var ext  = Path.GetExtension(filePath).ToLowerInvariant();
-        var info = new FileInfo(filePath);
+        var length = _fileSystem.GetFileLength(filePath);
 
         byte[] bytes;
-        try { bytes = await File.ReadAllBytesAsync(filePath, ct); }
+        try { bytes = await _fileSystem.ReadAllBytesAsync(filePath, ct); }
         catch (Exception ex)
         {
             return UploadValidator.Fail(FailureReason.UnknownError, $"读取文件失败: {ex.Message}");
         }
 
         return await UploadBytesAsync(bytes, Path.GetFileName(filePath),
-            GetMime(ext), info.Length, ct);
+            GetMime(ext), length, ct);
     }
 
-    // ── 公开方法：从远程 URL 下载后上传 ──────────────────────────────────────
+    /// <inheritdoc />
     public async Task<UploadResult> UploadFromUrlAsync(
         string imageUrl, CancellationToken ct = default)
     {
@@ -234,7 +134,7 @@ public class PostImageClient : IDisposable
             var contentType = rsp.Content.Headers.ContentType?.MediaType ?? "image/png";
             var fileName    = Path.GetFileName(new Uri(imageUrl).LocalPath);
             if (string.IsNullOrWhiteSpace(fileName) || fileName == "/")
-                fileName = $"upload_{DateTime.UtcNow:yyyyMMddHHmmss}.png";
+                fileName = $"upload_{_timeProvider.GetUtcNow():yyyyMMddHHmmss}.png";
 
             Log($"  ✓ 下载完成: {bytes.Length / 1024.0:F1} KB  " +
                 $"type={contentType}  file={fileName}");
@@ -247,13 +147,9 @@ public class PostImageClient : IDisposable
         }
     }
 
-    // ── 核心：构建 multipart/form-data 并上传 ────────────────────────────────
-    //
-    //  根据 Chrome 抓包还原真实请求：
-    //    POST https://postimages.org/json
-    //    字段: gallery / optsize / expire / numfiles / upload_session / file
-    //    响应: {"url":"https://postimg.cc/...","image":"..."}
-    //
+    /// <summary>
+    /// Constructs the multipart/form-data payload, submits it to the API, and validates the response.
+    /// </summary>
     private async Task<UploadResult> UploadBytesAsync(
         byte[] imageBytes, string fileName, string mimeType,
         long originalSize, CancellationToken ct)
@@ -269,7 +165,6 @@ public class PostImageClient : IDisposable
         Log($"  → 构建 multipart 请求（文件: {fileName}, " +
             $"大小: {imageBytes.Length / 1024.0:F1} KB）...");
 
-        // ── 生成 boundary（与 Chrome WebKit 格式一致）────────────────────────
         var boundary = "----WebKitFormBoundary" + Guid.NewGuid().ToString("N")[..16];
 
         await using var ms = new MemoryStream();
@@ -278,9 +173,8 @@ public class PostImageClient : IDisposable
         WriteField(ms, boundary, "expire",         "0");
         WriteField(ms, boundary, "numfiles",       "1");
         WriteField(ms, boundary, "upload_session",
-            $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.{new Random().Next(10000, 99999)}");
+            $"{_timeProvider.GetUtcNow().ToUnixTimeMilliseconds()}.{new Random().Next(10000, 99999)}");
 
-        // file part
         WriteTextLine(ms, $"--{boundary}");
         WriteTextLine(ms, $"Content-Disposition: form-data; name=\"file\"; filename=\"{fileName}\"");
         WriteTextLine(ms, $"Content-Type: {mimeType}");
@@ -295,7 +189,6 @@ public class PostImageClient : IDisposable
         Log($"  → 请求体大小: {bodyBytes.Length / 1024.0:F2} KB");
         Log("  → 正在上传到 postimages.org ...");
 
-        // ── 发送请求 ──────────────────────────────────────────────────────────
         using var request = new HttpRequestMessage(HttpMethod.Post, UploadApiUrl);
         request.Headers.Add("X-Requested-With", "XMLHttpRequest");
         request.Headers.Add("Accept",           "application/json");
@@ -305,7 +198,7 @@ public class PostImageClient : IDisposable
         request.Content = new ByteArrayContent(bodyBytes);
         request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
 
-        var uploadSw = System.Diagnostics.Stopwatch.StartNew();
+        var uploadStartTime = _timeProvider.GetTimestamp();
         HttpResponseMessage httpRsp;
         try
         {
@@ -321,8 +214,7 @@ public class PostImageClient : IDisposable
                 $"网络错误: {ex.Message}" +
                 (ex.InnerException != null ? $" (内部: {ex.InnerException.Message})" : ""));
         }
-        uploadSw.Stop();
-        result.UploadElapsed = uploadSw.Elapsed;
+        result.UploadElapsed = _timeProvider.GetElapsedTime(uploadStartTime);
 
         var rawJson = await httpRsp.Content.ReadAsStringAsync(ct);
         result.HttpStatusCode = (int)httpRsp.StatusCode;
@@ -331,7 +223,6 @@ public class PostImageClient : IDisposable
         Log($"  → HTTP {result.HttpStatusCode}  耗时: {result.UploadElapsed.TotalSeconds:F2}s");
         Log($"  → 响应: {rawJson}");
 
-        // ── 校验 1：HTTP 状态码 ──────────────────────────────────────────────
         if (!httpRsp.IsSuccessStatusCode)
         {
             string hint = result.HttpStatusCode switch
@@ -355,7 +246,6 @@ public class PostImageClient : IDisposable
             };
         }
 
-        // ── 校验 2：响应体非空 ────────────────────────────────────────────────
         if (string.IsNullOrWhiteSpace(rawJson))
         {
             result.Success      = false;
@@ -363,7 +253,6 @@ public class PostImageClient : IDisposable
             return result;
         }
 
-        // ── 校验 3：JSON 解析 ─────────────────────────────────────────────────
         PostImageJsonResponse? apiResp;
         try
         {
@@ -386,7 +275,6 @@ public class PostImageClient : IDisposable
             return result;
         }
 
-        // ── 校验 4：URL 合法性（必须是 postimg.cc 域名）──────────────────────
         if (!apiResp.IsValidUrl)
         {
             result.Success      = false;
@@ -399,28 +287,24 @@ public class PostImageClient : IDisposable
         result.PageUrl = pageUrl;
 
         Log($"  → 正在请求页面 HTML 以解析原始图片后缀的 URL: {pageUrl}");
-        var verifySw = System.Diagnostics.Stopwatch.StartNew();
+        var verifyStartTime = _timeProvider.GetTimestamp();
 
-        // 1. 请求 pageUrl 并从 HTML 解析出 i.postimg.cc 图片直链
         (var directUrl, var parseError) = await FetchAndParseDirectUrlAsync(pageUrl, ct);
         if (parseError is not null || directUrl is null)
         {
-            verifySw.Stop();
-            result.VerifyElapsed = verifySw.Elapsed;
+            result.VerifyElapsed = _timeProvider.GetElapsedTime(verifyStartTime);
             result.Success = false;
             result.ErrorMessage = $"失败原因: {FailureReason.InvalidResponseUrl} — {parseError}";
             return result;
         }
 
         result.DirectImageUrl = directUrl;
-        result.ImageUrl = directUrl; // 最终返回原始图片后缀的链接
+        result.ImageUrl = directUrl;
 
-        // 2. 主动验证该直链的可访问性
         Log($"  → 正在验证直链可访问性: {result.ImageUrl}");
         (result.LinkAccessible, var accessError) =
             await VerifyLinkAsync(result.ImageUrl!, ct);
-        verifySw.Stop();
-        result.VerifyElapsed = verifySw.Elapsed;
+        result.VerifyElapsed = _timeProvider.GetElapsedTime(verifyStartTime);
 
         if (!result.LinkAccessible)
         {
@@ -430,13 +314,11 @@ public class PostImageClient : IDisposable
             return result;
         }
 
-        // ── 全部通过 ──────────────────────────────────────────────────────────
         Log($"  ✓ 直链验证通过（耗时 {result.VerifyElapsed.TotalSeconds:F2}s）");
         result.Success = true;
         return result;
     }
 
-    // ── 链接可访问性校验 ──────────────────────────────────────────────────────
     private async Task<(bool ok, string? error)> VerifyLinkAsync(
         string url, CancellationToken ct)
     {
@@ -455,7 +337,6 @@ public class PostImageClient : IDisposable
                 return (true, null);
             }
 
-            // fallback to GET
             var getResp = await verifyClient.GetAsync(url,
                 HttpCompletionOption.ResponseHeadersRead, ct);
 
@@ -477,11 +358,12 @@ public class PostImageClient : IDisposable
         }
     }
 
-    // ── 工具方法 ──────────────────────────────────────────────────────────────
-
     private void Log(string message)
     {
-        if (_verbose) Console.Error.WriteLine(message);
+        if (_options.Verbose)
+        {
+            _logger.LogInformation("{Message}", message);
+        }
     }
 
     private static void WriteField(Stream s, string boundary, string name, string value)
@@ -538,23 +420,26 @@ public class PostImageClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Parses the direct image URL from the returned HTML page string.
+    /// Uses regex matching since the HTML is relatively simple and adding an HTML parser dependency is unnecessary.
+    /// </summary>
+    /// <param name="html">The HTML content of the postimg.cc page.</param>
+    /// <returns>The direct image URL if found; otherwise, null.</returns>
     public static string? ParseDirectImageUrl(string html)
     {
         if (string.IsNullOrWhiteSpace(html)) return null;
 
-        // Method 1: parse input id="direct" value="xxx"
         var directMatch = System.Text.RegularExpressions.Regex.Match(html, 
             @"id=""direct""\s+value=""([^""]+)""", 
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (directMatch.Success) return directMatch.Groups[1].Value;
 
-        // Method 2: parse <meta property="og:image" content="xxx">
         var ogMatch = System.Text.RegularExpressions.Regex.Match(html, 
             @"<meta\s+property=""og:image""\s+content=""([^""]+)""", 
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (ogMatch.Success) return ogMatch.Groups[1].Value;
 
-        // Method 3: parse domain i.postimg.cc link pattern
         var fallbackMatch = System.Text.RegularExpressions.Regex.Match(html, 
             @"https?://i\.postimg\.cc/[a-zA-Z0-9]+/[^""\s>]+", 
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -563,10 +448,11 @@ public class PostImageClient : IDisposable
         return null;
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;
-        _httpClient.Dispose();
+        // _httpClient is managed by DI
         _disposed = true;
     }
 }
