@@ -12,10 +12,20 @@ using Microsoft.Extensions.Logging;
 
 namespace App.Cli;
 
+/// <summary>
+/// The thin CLI wrapper for the PostImage uploader core library.
+/// Handles argument parsing, DI container setup, and global exception mapping.
+/// </summary>
 public class Program
 {
+    /// <summary>
+    /// The main entry point for the CLI application.
+    /// </summary>
+    /// <param name="args">Command line arguments passed to the application.</param>
+    /// <returns>An exit code: 0 for success, 1 for failure, 2 for invalid arguments.</returns>
     public static async Task<int> Main(string[] args)
     {
+        // Ensure emojis or special characters in paths/urls don't break stdout rendering
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
         if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
@@ -81,9 +91,10 @@ public class Program
             return 2;
         }
 
-        // Host building
+        // ── Dependency Injection & Host Building ──────────────────────────────────
         var builder = Host.CreateDefaultBuilder(args);
 
+        // Map CLI arguments into the configuration so the Core library can read them
         builder.ConfigureAppConfiguration((context, config) =>
         {
             config.AddInMemoryCollection(new[]
@@ -108,14 +119,17 @@ public class Program
 
         builder.ConfigureServices((context, services) =>
         {
+            // Defer all core logic and dependency wire-ups to the library's extension method
             services.AddMyAppCore(context.Configuration);
         });
 
         using var host = builder.Build();
         var client = host.Services.GetRequiredService<IPostImageClient>();
 
+        // Set a hard global timeout for the entire CLI operation
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
 
+        // ── Execution & Global Exception Handling ─────────────────────────────────
         UploadResult result;
         try
         {

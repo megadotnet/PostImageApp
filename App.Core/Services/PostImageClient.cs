@@ -14,6 +14,10 @@ using Microsoft.Extensions.Options;
 
 namespace App.Core.Services;
 
+/// <summary>
+/// The primary implementation of <see cref="IPostImageClient"/> that handles the HTTP communication
+/// with PostImages.org, mimicking browser behavior to bypass basic bot protections.
+/// </summary>
 public class PostImageClient : IPostImageClient, IDisposable
 {
     private readonly HttpClient _httpClient;
@@ -29,6 +33,9 @@ public class PostImageClient : IPostImageClient, IDisposable
     private bool _sessionReady;
     private bool _disposed;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PostImageClient"/> class.
+    /// </summary>
     public PostImageClient(
         HttpClient httpClient,
         ILogger<PostImageClient> logger,
@@ -57,6 +64,9 @@ public class PostImageClient : IPostImageClient, IDisposable
             "zh-CN,zh;q=0.9,en;q=0.8");
     }
 
+    /// <summary>
+    /// Makes an initial request to the homepage to obtain session cookies required by the upload API.
+    /// </summary>
     private async Task EnsureSessionAsync(CancellationToken ct)
     {
         if (_sessionReady) return;
@@ -78,6 +88,7 @@ public class PostImageClient : IPostImageClient, IDisposable
         _sessionReady = true;
     }
 
+    /// <inheritdoc />
     public async Task<UploadResult> UploadFileAsync(
         string filePath, CancellationToken ct = default)
     {
@@ -98,6 +109,7 @@ public class PostImageClient : IPostImageClient, IDisposable
             GetMime(ext), length, ct);
     }
 
+    /// <inheritdoc />
     public async Task<UploadResult> UploadFromUrlAsync(
         string imageUrl, CancellationToken ct = default)
     {
@@ -135,6 +147,9 @@ public class PostImageClient : IPostImageClient, IDisposable
         }
     }
 
+    /// <summary>
+    /// Constructs the multipart/form-data payload, submits it to the API, and validates the response.
+    /// </summary>
     private async Task<UploadResult> UploadBytesAsync(
         byte[] imageBytes, string fileName, string mimeType,
         long originalSize, CancellationToken ct)
@@ -405,6 +420,12 @@ public class PostImageClient : IPostImageClient, IDisposable
         }
     }
 
+    /// <summary>
+    /// Parses the direct image URL from the returned HTML page string.
+    /// Uses regex matching since the HTML is relatively simple and adding an HTML parser dependency is unnecessary.
+    /// </summary>
+    /// <param name="html">The HTML content of the postimg.cc page.</param>
+    /// <returns>The direct image URL if found; otherwise, null.</returns>
     public static string? ParseDirectImageUrl(string html)
     {
         if (string.IsNullOrWhiteSpace(html)) return null;
@@ -427,6 +448,7 @@ public class PostImageClient : IPostImageClient, IDisposable
         return null;
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed) return;

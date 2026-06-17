@@ -7,11 +7,20 @@ using Microsoft.Extensions.Options;
 
 namespace App.Core.Services;
 
+/// <summary>
+/// Provides pure validation logic for local files and remote URLs.
+/// Does not depend on network calls, making it highly testable.
+/// </summary>
 public class UploadValidator
 {
     private readonly IFileSystem _fileSystem;
     private readonly PostImageUploaderOptions _options;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="UploadValidator"/> class.
+    /// </summary>
+    /// <param name="fileSystem">The file system abstraction used to check file existence and size.</param>
+    /// <param name="options">The configured options for the uploader (e.g., max size, supported extensions).</param>
     public UploadValidator(IFileSystem fileSystem, IOptions<PostImageUploaderOptions> options)
     {
         _fileSystem = fileSystem;

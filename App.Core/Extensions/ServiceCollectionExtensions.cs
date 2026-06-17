@@ -10,8 +10,18 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace App.Core.Extensions;
 
+/// <summary>
+/// Provides extension methods for setting up App.Core services in an <see cref="IServiceCollection"/>.
+/// </summary>
 public static class ServiceCollectionExtensions
 {
+    /// <summary>
+    /// Adds and configures all necessary services for the App.Core class library,
+    /// including configuration binding, abstractions, and the primary HTTP client.
+    /// </summary>
+    /// <param name="services">The service collection to add the services to.</param>
+    /// <param name="configuration">The application configuration properties.</param>
+    /// <returns>The same service collection so that multiple calls can be chained.</returns>
     public static IServiceCollection AddMyAppCore(
         this IServiceCollection services,
         IConfiguration configuration)
